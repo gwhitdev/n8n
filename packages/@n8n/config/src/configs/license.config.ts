@@ -18,6 +18,13 @@ export class LicenseConfig {
 	@Env('N8N_LICENSE_DETACH_FLOATING_ON_SHUTDOWN')
 	detachFloatingOnShutdown: boolean = true;
 
+	/**
+	 * SHA-256 hash of your local fork activation key, as 64 lowercase hexadecimal characters.
+	 * Set this to use local activation. When unset, n8n uses its standard license server.
+	 */
+	@Env('N8N_FORK_LICENSE_KEY_HASH')
+	forkKeyHash?: string;
+
 	/** Tenant identifier for the license SDK (for example, self-hosted, sandbox, embed, cloud). */
 	@Env('N8N_LICENSE_TENANT_ID')
 	tenantId: number = 1;
