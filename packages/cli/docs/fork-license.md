@@ -39,6 +39,17 @@ To activate through the editor, keep a private copy of that value and remove tha
 line from the file. Start n8n, open Settings, and enter the key in the existing
 license activation form. The server stores only the hash in a separate setting.
 
+Manual activation waits for newly licensed modules, routes, auth handlers, and
+execution hooks to load. It does not require a container restart. Existing modules
+and handlers stay in place. New module tasks use the scheduler's runtime registration.
+Queue-mode processes apply the same loading steps when they receive the reload event.
+
+If loading fails, the activation request reports the error. Correct the underlying
+configuration or service failure, then submit the same key again. Completed module
+initialization and task registration are not repeated during that retry.
+Changing deployment configuration, such as the trusted key hash or storage mode,
+still requires the normal container redeployment.
+
 Set the same `N8N_FORK_LICENSE_KEY_HASH` on every main, worker, and webhook process.
 The persisted hash restores activation after restart. Activation and clear commands
 publish the existing license reload event in queue mode. After changing the hash,

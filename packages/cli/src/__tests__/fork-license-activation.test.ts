@@ -124,4 +124,41 @@ describe('Fork license activation', () => {
 			email: undefined,
 		});
 	});
+	it('waits for runtime feature loading and reports its failures', async () => {
+		const license = createLicense();
+		await license.init();
+		let resolve!: () => void;
+		const ready = new Promise<void>((done) => { resolve = done; });
+		let notifyStarted!: () => void;
+		const started = new Promise<void>((done) => { notifyStarted = done; });
+		const refresh = vi.fn().mockImplementationOnce(async () => {
+			notifyStarted();
+			await ready;
+		});
+		license.onLocalFeatureChange(refresh);
+		let completed = false;
+		const activation = license.activate(KEY).then(() => { completed = true; });
+		await started;
+		expect(completed).toBe(false);
+		resolve();
+		await activation;
+		expect(refresh).toHaveBeenCalledOnce();
+		refresh.mockRejectedValueOnce(new Error('Runtime module unavailable'));
+		await expect(license.activate(KEY)).rejects.toThrow('Runtime module unavailable');
+		await expect(license.activate(KEY)).resolves.toBeUndefined();
+	});
+
+	it('loads local features when another process reloads the stored activation', async () => {
+		const first = createLicense();
+		const second = createLicense();
+		await first.init();
+		await second.init();
+		const refresh = vi.fn().mockResolvedValue(undefined);
+		second.onLocalFeatureChange(refresh);
+		await first.activate(KEY);
+		await second.reload();
+		expect(refresh).toHaveBeenCalledOnce();
+		expect(second.isLicensed(LICENSE_FEATURES.SOURCE_CONTROL)).toBe(true);
+	});
+
 });

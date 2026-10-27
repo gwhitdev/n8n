@@ -450,3 +450,34 @@ describe('ControllerRegistry', () => {
 		});
 	});
 });
+
+describe('incremental controller registration', () => {
+	it('adds routes before an existing fallback and does not register them twice', async () => {
+		const app = express();
+		const metadata = Container.get(ControllerRegistryMetadata);
+		const auth = mock<AuthService>();
+		auth.createAuthMiddleware.mockReturnValue((_req, _res, next) => next());
+		const registry = new ControllerRegistry(
+			mock<License>(), auth, mock<GlobalConfig>({ endpoints: { rest: 'rest' } }),
+			metadata, mock<LastActiveAtService>(), new RateLimitService(),
+		);
+		registry.activate(app);
+		app.use((_req, res) => res.sendStatus(404));
+		await request(app).get('/rest/runtime-activation-example').expect(404);
+
+		@RestController('/runtime-activation-example')
+		class RuntimeController {
+			@Get('/')
+			read() {
+				return { ready: true };
+			}
+		}
+		Container.get(RuntimeController);
+		registry.activateNewControllers();
+		const calls = auth.createAuthMiddleware.mock.calls.length;
+		registry.activateNewControllers();
+		expect(auth.createAuthMiddleware.mock.calls.length).toBe(calls);
+		const response = await request(app).get('/rest/runtime-activation-example').expect(200);
+		expect(response.body.data).toEqual({ ready: true });
+	});
+});

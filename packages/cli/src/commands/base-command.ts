@@ -358,6 +358,11 @@ export abstract class BaseCommand<F = never> {
 		// Imported here so one-off CLI commands do not load the runner's scheduler graph.
 		const { SystemTaskRunner } = await import('@/scheduling/system-tasks/system-task-runner.js');
 		await Container.get(SystemTaskRunner).init();
+
+		if (this.globalConfig.license.forkKeyHash) {
+			const { LicensedModuleLoader } = await import('@/license/licensed-module-loader.js');
+			await Container.get(LicensedModuleLoader).start();
+		}
 	}
 
 	/**

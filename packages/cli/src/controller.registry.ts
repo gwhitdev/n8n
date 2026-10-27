@@ -33,6 +33,10 @@ import type { BodyArg } from './public-api/public-api-route-resolver';
 
 @Service()
 export class ControllerRegistry {
+	private router?: Router;
+
+	private readonly activeControllers = new Set<Controller>();
+
 	constructor(
 		private readonly license: License,
 		private readonly authService: AuthService,
@@ -43,14 +47,26 @@ export class ControllerRegistry {
 	) {}
 
 	activate(app: Application) {
+		if (!this.router) {
+			this.router = Router();
+			app.use(this.router);
+		}
+		this.activateNewControllers();
+	}
+
+	activateNewControllers() {
+		if (!this.router) return;
+
 		for (const controllerClass of this.metadata.controllerClasses) {
+			if (this.activeControllers.has(controllerClass)) continue;
 			const metadata = this.metadata.getControllerMetadata(controllerClass);
 			if (metadata.isPublicApi) continue;
-			this.activateController(app, controllerClass);
+			this.activateController(this.router, controllerClass);
+			this.activeControllers.add(controllerClass);
 		}
 	}
 
-	private activateController(app: Application, controllerClass: Controller) {
+	private activateController(app: Router, controllerClass: Controller) {
 		const metadata = this.metadata.getControllerMetadata(controllerClass);
 
 		const router = Router({ mergeParams: true });
@@ -58,7 +74,6 @@ export class ControllerRegistry {
 			? metadata.basePath
 			: `/${this.globalConfig.endpoints.rest}/${metadata.basePath}`;
 		const prefix = basePath.replace(/\/+/g, '/').replace(/\/$/, '');
-		app.use(prefix === '' ? '/' : prefix, router);
 
 		const controller = Container.get(controllerClass) as Controller;
 		const controllerMiddlewares = metadata.middlewares.map(
@@ -163,6 +178,7 @@ export class ControllerRegistry {
 				AbstractServer.botAllowedPaths.push(regexStr);
 			}
 		}
+		app.use(prefix === '' ? '/' : prefix, router);
 	}
 
 	/**

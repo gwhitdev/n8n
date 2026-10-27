@@ -47,6 +47,17 @@ export class License implements LicenseProvider {
 
 	private refreshCallbacks: LicenseRefreshCallback[] = [];
 
+	private readonly localFeatureCallbacks = new Set<() => Promise<void>>();
+
+	onLocalFeatureChange(callback: () => Promise<void>): () => void {
+		this.localFeatureCallbacks.add(callback);
+		return () => this.localFeatureCallbacks.delete(callback);
+	}
+
+	private async refreshLocalFeatures() {
+		for (const callback of this.localFeatureCallbacks) await callback();
+	}
+
 	private hasWarnedShortDeviceFingerprint = false;
 
 	constructor(
@@ -263,6 +274,7 @@ export class License implements LicenseProvider {
 			}
 			await this.saveForkLicense(this.forkLicense.keyHash);
 			this.forkLicense.restore(this.forkLicense.keyHash);
+			await this.refreshLocalFeatures();
 			await this.broadcastReloadLicenseCommand();
 			await this.notifyRefreshCallbacks();
 			return;
@@ -281,6 +293,7 @@ export class License implements LicenseProvider {
 	async reload(): Promise<void> {
 		if (this.forkLicense) {
 			await this.reloadForkLicense();
+			await this.refreshLocalFeatures();
 			await this.notifyRefreshCallbacks();
 			return;
 		}

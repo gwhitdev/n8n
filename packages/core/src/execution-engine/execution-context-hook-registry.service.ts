@@ -35,7 +35,10 @@ export class ExecutionContextHookRegistry {
 		this.hookMap.clear();
 		this.globalHook.clear();
 		this.subExecutionHook.clear();
+		await this.registerNewHooks();
+	}
 
+	async registerNewHooks({ throwOnError = false }: { throwOnError?: boolean } = {}) {
 		const hookClasses = this.executionContextHookMetadata.getClasses();
 		const globalHookClasses = this.executionContextHookMetadata.getGlobalClasses();
 		const subExecutionHookClasses = this.executionContextHookMetadata.getSubExecutionClasses();
@@ -50,8 +53,11 @@ export class ExecutionContextHookRegistry {
 					`Failed to instantiate execution context hook class "${hookClass.name}": ${(error as Error).message}`,
 					{ error },
 				);
+				if (throwOnError) throw error;
 				continue;
 			}
+
+			if (this.hookMap.get(hook.hookDescription.name) === hook) continue;
 
 			if (this.hookMap.has(hook.hookDescription.name)) {
 				this.logger.warn(
@@ -67,6 +73,7 @@ export class ExecutionContextHookRegistry {
 						`Failed to initialize execution context hook "${hook.hookDescription.name}": ${(error as Error).message}`,
 						{ error },
 					);
+					if (throwOnError) throw error;
 					continue;
 				}
 			}

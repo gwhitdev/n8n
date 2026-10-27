@@ -123,6 +123,11 @@ export class Server extends AbstractServer {
 			void this.loadNodesAndCredentials.setupHotReload();
 		}
 
+		if (this.globalConfig.license.forkKeyHash) {
+			const { LicensedModuleLoader } = await import('@/license/licensed-module-loader.js');
+			await Container.get(LicensedModuleLoader).start();
+		}
+
 		this.markAsReady();
 
 		this.eventService.emit('server-started');
