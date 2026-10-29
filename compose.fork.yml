@@ -1,0 +1,16 @@
+services:
+  n8n:
+    image: n8nio/n8n:local
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    env_file:
+      - ./fork-license.env
+    environment:
+      N8N_SECURE_COOKIE: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

@@ -29,7 +29,10 @@ export class AuthHandlerRegistry {
 	 */
 	async init() {
 		this.handlerMap.clear();
+		await this.registerNewHandlers();
+	}
 
+	async registerNewHandlers({ throwOnError = false }: { throwOnError?: boolean } = {}) {
 		const handlerClasses = this.authHandlerEntryMetadata.getClasses();
 		this.logger.debug(`Registering ${handlerClasses.length} auth handlers.`);
 
@@ -51,8 +54,11 @@ export class AuthHandlerRegistry {
 					`Failed to instantiate auth handler class "${HandlerClass.name}": ${(error as Error).message}`,
 					{ error },
 				);
+				if (throwOnError) throw error;
 				continue;
 			}
+
+			if (this.handlerMap.get(handler.metadata.name) === handler) continue;
 
 			if (this.handlerMap.has(handler.metadata.name)) {
 				this.logger.warn(
@@ -69,6 +75,7 @@ export class AuthHandlerRegistry {
 						`Failed to initialize auth handler "${handler.metadata.name}": ${(error as Error).message}`,
 						{ error },
 					);
+					if (throwOnError) throw error;
 					continue;
 				}
 			}

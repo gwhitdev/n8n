@@ -100,6 +100,12 @@ export class ModuleRegistry {
 
 	private readonly activeModules: string[] = [];
 
+	private initialization: Promise<void> = Promise.resolve();
+
+	private readonly initializedModules = new Set<string>();
+
+	private readonly modulesWithTasks = new Set<string>();
+
 	private warnedSkillsKept = false;
 
 	private readonly packagedModules: PackagedModules = {};
@@ -226,10 +232,19 @@ export class ModuleRegistry {
 	 * @param only Init only these modules, for a one-off command that needs a few of them.
 	 */
 	async initModules(instanceType: InstanceType, only?: ModuleName[]) {
+		const pending = this.initialization.then(async () => {
+			await this.initPendingModules(instanceType, only);
+		});
+		this.initialization = pending.catch(() => {});
+		await pending;
+	}
+
+	private async initPendingModules(instanceType: InstanceType, only?: ModuleName[]) {
 		const selected = only ? new Set<string>(only) : undefined;
 
 		for (const [moduleName, moduleEntry] of this.moduleMetadata.getEntries()) {
 			if (selected && !selected.has(moduleName)) continue;
+			if (this.activeModules.includes(moduleName)) continue;
 
 			const { licenseFlag, instanceTypes, class: ModuleClass } = moduleEntry;
 
@@ -245,12 +260,17 @@ export class ModuleRegistry {
 				continue;
 			}
 
-			await Container.get(ModuleClass).init?.();
+			if (!this.initializedModules.has(moduleName)) {
+				await Container.get(ModuleClass).init?.();
+				this.initializedModules.add(moduleName);
+			}
 
-			const systemTasks = await Container.get(ModuleClass).systemTasks?.();
-
-			for (const taskClass of systemTasks ?? []) {
-				this.systemTaskMetadata.register(taskClass);
+			if (!this.modulesWithTasks.has(moduleName)) {
+				const systemTasks = await Container.get(ModuleClass).systemTasks?.();
+				for (const taskClass of systemTasks ?? []) {
+					this.systemTaskMetadata.register(taskClass);
+				}
+				this.modulesWithTasks.add(moduleName);
 			}
 
 			const moduleSettings = await Container.get(ModuleClass).settings?.();
@@ -301,6 +321,7 @@ export class ModuleRegistry {
 		}
 
 		await Container.get(moduleEntry.class).shutdown?.();
+		this.initializedModules.delete(moduleName);
 
 		const index = this.activeModules.indexOf(moduleName);
 		if (index > -1) this.activeModules.splice(index, 1);

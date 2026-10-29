@@ -721,3 +721,46 @@ describe('nodeLoaders', () => {
 		expect(moduleRegistry.nodeLoaders).toEqual([TEST_LOADER]);
 	});
 });
+
+describe('incremental module initialization', () => {
+	it('loads a newly licensed module once across concurrent calls', async () => {
+		let licensed = false;
+		const instance = { init: vi.fn(), systemTasks: vi.fn().mockReturnValue([]) };
+		const metadata = mock<ModuleMetadata>({
+			getEntries: vi.fn().mockReturnValue([
+				['source-control', { class: instance, licenseFlag: 'feat:sourceControl' }],
+			]),
+		});
+		Container.get = vi.fn().mockReturnValue(instance);
+		const registry = new ModuleRegistry(
+			metadata, mock<LicenseState>({ isLicensed: () => licensed }), mock(), mock(), mock(),
+		);
+		await registry.initModules('main');
+		expect(instance.init).not.toHaveBeenCalled();
+		licensed = true;
+		await Promise.all([registry.initModules('main'), registry.initModules('main')]);
+		expect(instance.init).toHaveBeenCalledOnce();
+		expect(instance.systemTasks).toHaveBeenCalledOnce();
+		expect(registry.getActiveModules()).toEqual(['source-control']);
+	});
+
+	it('retries settings without starting the module or registering its tasks again', async () => {
+		const Task = class TestTask {};
+		const instance = {
+			init: vi.fn(),
+			systemTasks: vi.fn().mockReturnValue([Task]),
+			settings: vi.fn().mockRejectedValueOnce(new Error('Settings unavailable')).mockResolvedValue({}),
+		};
+		const metadata = mock<ModuleMetadata>({
+			getEntries: vi.fn().mockReturnValue([['source-control', { class: instance }]]),
+		});
+		Container.get = vi.fn().mockReturnValue(instance);
+		const tasks = mock<SystemTaskMetadata>();
+		const registry = new ModuleRegistry(metadata, mock(), mock(), mock(), tasks);
+		await expect(registry.initModules('main')).rejects.toThrow('Settings unavailable');
+		await registry.initModules('main');
+		expect(instance.init).toHaveBeenCalledOnce();
+		expect(tasks.register).toHaveBeenCalledOnce();
+		expect(registry.getActiveModules()).toEqual(['source-control']);
+	});
+});

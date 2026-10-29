@@ -13,6 +13,15 @@ export class SettingsRepository extends BaseRepository<Settings> {
 		super(Settings, dataSource.manager, transactionRunner);
 	}
 
+	async getForkLicenseKeyHash(): Promise<string> {
+		const stored = await this.findByKey('license.forkKeyHash');
+		return stored?.value ?? '';
+	}
+
+	async setForkLicenseKeyHash(value: string): Promise<void> {
+		await this.upsertByKey('license.forkKeyHash', value, false, {});
+	}
+
 	async findByKey(key: string, em?: EntityManager): Promise<Settings | null> {
 		const manager = em ?? this.manager;
 		return await manager.findOneBy(Settings, { key });

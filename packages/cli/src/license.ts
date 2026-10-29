@@ -21,6 +21,7 @@ import { InstanceSettings } from 'n8n-core';
 import { LicenseMetricsService } from '@/metrics/license-metrics.service';
 
 import { N8N_VERSION, SETTINGS_LICENSE_CERT_KEY } from './constants';
+import { ForkLicense } from './license/fork-license';
 
 const LICENSE_RENEWAL_DISABLED_WARNING =
 	'Automatic license renewal is disabled. The license will not renew automatically, and access to licensed features may be lost!';
@@ -40,9 +41,22 @@ type LicenseRefreshCallback = (cert: string) => void;
 export class License implements LicenseProvider {
 	private manager: LicenseManager | undefined;
 
+	private forkLicense: ForkLicense | undefined;
+
 	private isShuttingDown = false;
 
 	private refreshCallbacks: LicenseRefreshCallback[] = [];
+
+	private readonly localFeatureCallbacks = new Set<() => Promise<void>>();
+
+	onLocalFeatureChange(callback: () => Promise<void>): () => void {
+		this.localFeatureCallbacks.add(callback);
+		return () => this.localFeatureCallbacks.delete(callback);
+	}
+
+	private async refreshLocalFeatures() {
+		for (const callback of this.localFeatureCallbacks) await callback();
+	}
 
 	private hasWarnedShortDeviceFingerprint = false;
 
@@ -66,6 +80,13 @@ export class License implements LicenseProvider {
 		}
 		if (this.isShuttingDown) {
 			this.logger.warn('License manager already shutting down');
+			return;
+		}
+
+		const { forkKeyHash } = this.globalConfig.license;
+		if (forkKeyHash) {
+			this.forkLicense ??= new ForkLicense(forkKeyHash);
+			await this.reloadForkLicense();
 			return;
 		}
 
@@ -157,7 +178,19 @@ export class License implements LicenseProvider {
 		return derivedInstanceId;
 	}
 
+	private async reloadForkLicense() {
+		const storedHash = await this.settingsRepository.getForkLicenseKeyHash();
+		this.forkLicense?.restore(storedHash);
+	}
+
+	private async saveForkLicense(value: string) {
+		await this.settingsRepository.setForkLicenseKeyHash(value);
+	}
+
 	async loadCertStr(): Promise<TLicenseBlock> {
+		// Local keys are not certificates for n8n-hosted services.
+		if (this.forkLicense) return '';
+
 		// if we have an ephemeral license, we don't want to load it from the database
 		const ephemeralLicense = this.globalConfig.license.cert;
 		if (ephemeralLicense) {
@@ -235,6 +268,18 @@ export class License implements LicenseProvider {
 	async activate(activationKey: string): Promise<void>;
 	async activate(activationKey: string, eulaUri: string, userEmail: string): Promise<void>;
 	async activate(activationKey: string, eulaUri?: string, userEmail?: string): Promise<void> {
+		if (this.forkLicense) {
+			if (!this.forkLicense.matches(activationKey)) {
+				throw new Error('The activation key does not match the configured fork key');
+			}
+			await this.saveForkLicense(this.forkLicense.keyHash);
+			this.forkLicense.restore(this.forkLicense.keyHash);
+			await this.refreshLocalFeatures();
+			await this.broadcastReloadLicenseCommand();
+			await this.notifyRefreshCallbacks();
+			return;
+		}
+
 		if (!this.manager) {
 			return;
 		}
@@ -246,6 +291,13 @@ export class License implements LicenseProvider {
 	/** Loads the cert another instance stored. Never renews. */
 	@OnPubSubEvent('reload-license')
 	async reload(): Promise<void> {
+		if (this.forkLicense) {
+			await this.reloadForkLicense();
+			await this.refreshLocalFeatures();
+			await this.notifyRefreshCallbacks();
+			return;
+		}
+
 		if (!this.manager) {
 			return;
 		}
@@ -263,10 +315,15 @@ export class License implements LicenseProvider {
 
 	/** Runs one auto-renewal pass. */
 	async renewIfDue(): Promise<void> {
-		await this.manager?.renewIfDue();
+		if (!this.forkLicense) await this.manager?.renewIfDue();
 	}
 
 	async renew() {
+		if (this.forkLicense) {
+			await this.reload();
+			return;
+		}
+
 		if (!this.manager) {
 			return;
 		}
@@ -276,6 +333,14 @@ export class License implements LicenseProvider {
 	}
 
 	async clear() {
+		if (this.forkLicense) {
+			await this.saveForkLicense('');
+			this.forkLicense.restore('');
+			await this.broadcastReloadLicenseCommand();
+			await this.notifyRefreshCallbacks();
+			return;
+		}
+
 		if (!this.manager) {
 			return;
 		}
@@ -299,14 +364,17 @@ export class License implements LicenseProvider {
 	}
 
 	isLicensed(feature: BooleanLicenseFeature) {
+		if (this.forkLicense) return this.forkLicense.isLicensed(feature);
 		return this.manager?.hasFeatureEnabled(feature) ?? false;
 	}
 
 	isCertValid(): boolean {
+		if (this.forkLicense) return this.forkLicense.active;
 		return this.manager?.isValid(false /* useLogger */) ?? false;
 	}
 
 	hasFeatureInCert(feature: BooleanLicenseFeature): boolean {
+		if (this.forkLicense) return this.forkLicense.isLicensed(feature);
 		return this.manager?.hasFeatureEnabled(feature, false) ?? false;
 	}
 
@@ -426,14 +494,18 @@ export class License implements LicenseProvider {
 	}
 
 	getCurrentEntitlements() {
+		if (this.forkLicense) return [];
 		return this.manager?.getCurrentEntitlements() ?? [];
 	}
 
 	getValue<T extends keyof FeatureReturnType>(feature: T): FeatureReturnType[T] {
+		if (this.forkLicense) return this.forkLicense.getValue(feature);
 		return this.manager?.getFeatureValue(feature) as FeatureReturnType[T];
 	}
 
 	getManagementJwt(): string {
+		if (this.forkLicense) return '';
+
 		if (!this.manager) {
 			return '';
 		}
@@ -444,6 +516,8 @@ export class License implements LicenseProvider {
 	 * Helper function to get the latest main plan for a license
 	 */
 	getMainPlan(): TEntitlement | undefined {
+		if (this.forkLicense) return undefined;
+
 		if (!this.manager) {
 			return undefined;
 		}
@@ -461,6 +535,8 @@ export class License implements LicenseProvider {
 	}
 
 	getConsumerId() {
+		if (this.forkLicense) return 'fork-local';
+
 		return this.manager?.getConsumerId() ?? 'unknown';
 	}
 
@@ -504,6 +580,8 @@ export class License implements LicenseProvider {
 	}
 
 	getExpiryDate(): Date | null {
+		if (this.forkLicense) return null;
+
 		try {
 			return this.manager?.getExpiryDate() ?? null;
 		} catch {
@@ -512,6 +590,8 @@ export class License implements LicenseProvider {
 	}
 
 	getTerminationDate(): Date | null {
+		if (this.forkLicense) return null;
+
 		try {
 			return this.manager?.getTerminationDate() ?? null;
 		} catch {
@@ -550,6 +630,10 @@ export class License implements LicenseProvider {
 	}
 
 	getInfo(): string {
+		if (this.forkLicense) {
+			return JSON.stringify({ planName: this.getPlanName(), active: this.forkLicense.active });
+		}
+
 		if (!this.manager) {
 			return 'n/a';
 		}
