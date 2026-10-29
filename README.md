@@ -15,6 +15,13 @@ Fair-code platform to build and deploy AI agents and workflows. Combine a visual
 - **Enterprise-Ready AI**: Self-host or deploy securely with role-based access, audit trails, and support for sensitive data
 - **Leverage What Already Exists**: 1500+ integrations and 9,000+ workflow [templates](https://n8n.io/workflows) to connect AI with your existing systems
 
+## Run this fork locally
+
+Follow the [local Docker setup guide](LOCAL_DOCKER.md) to clone the fork branch,
+build its Docker image, create the local activation file, and start the container.
+Run `node scripts/create-fork-license.mjs` once from that branch to create the
+private activation file. The Compose service loads it for automatic activation.
+
 ## Quick Start
 
 Try n8n instantly with our install script (requires [Docker](https://www.docker.com/)):
